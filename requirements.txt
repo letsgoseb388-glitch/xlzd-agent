@@ -1,0 +1,17 @@
+# Python dependencies for the xlzd-agent pipeline.
+#
+# torch is NOT listed here — setup_env.sh installs the right torch build
+# (CUDA or CPU) from the correct index before installing this file.
+#
+# Versions are pinned to a known-good working set.
+
+numpy==2.5.1
+pandas==3.0.5
+scipy==1.18.0
+scikit-learn==1.9.0
+h5py==3.16.0
+matplotlib==3.11.1
+plotly==6.9.0
+joblib==1.5.3
+tqdm==4.70.0
+tomli==2.4.1

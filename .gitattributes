@@ -1,0 +1,4 @@
+# Store the bundled sample dataset with Git LFS so the repo stays small
+# and the CSVs download automatically on clone.
+data/train_data/** filter=lfs diff=lfs merge=lfs -text
+data/val_data/**   filter=lfs diff=lfs merge=lfs -text
