@@ -6,7 +6,7 @@ files directly, so it does not depend on having the live result objects in
 memory. It writes the plots to an outputs/plots directory.
 
 Plots produced:
-  - CNP predicted vs true shell occupancy (training and validation splits)
+  - CNP predicted vs true shell occupancy (training split and independent validation set)
   - MF-GP validation points (HF truth vs prediction with 1/2/3 sigma)
   - MF-GP validation parity (prediction vs truth)
   - MF-GP predicted mean and uncertainty surface over the geometry space
@@ -37,8 +37,8 @@ def main():
     )
     parser.add_argument("--cnp-train", default="../outputs/cnp/cnp_shell_v1_output.csv",
                         help="CNP training-split prediction CSV.")
-    parser.add_argument("--cnp-val", default="../outputs/cnp/cnp_shell_v1_output_validation.csv",
-                        help="CNP validation-split prediction CSV.")
+    parser.add_argument("--cnp-val", default="../outputs/cnp/cnp_shell_v1_output_independent.csv",
+                        help="CNP prediction CSV for the independent validation set (data/val_data).")
     parser.add_argument("--mfgp-predictions", default="../outputs/mfgp/mfgp_mfgp_v1_predictions.csv",
                         help="MF-GP validation predictions CSV.")
     parser.add_argument("--mfgp-model", default="../outputs/mfgp/mfgp_mfgp_v1_model.joblib",
@@ -55,7 +55,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     print(f"Writing plots to {outdir}")
 
-    # --- CNP shell occupancy (training + validation) ---
+    # --- CNP shell occupancy (training + independent validation) ---
     cnp_train = Path(args.cnp_train).resolve()
     cnp_val = Path(args.cnp_val).resolve()
     if cnp_train.exists():

@@ -6,7 +6,7 @@ import json
 import shutil
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional, Sequence
@@ -45,6 +45,8 @@ TARGET_COLUMN = "target_shell"
 THETA_HEADERS = ["detector_R", "detector_Z"]
 PHI_HEADERS = ["s_r", "s_z_from_center"]
 MANIFEST_NAME = "file_manifest.csv"
+INDEPENDENT_MANIFEST_NAME = "validation_manifest.csv"
+PREPARATION_MODES = ("training", "independent_validation")
 
 
 # -----------------------------------------------------------------------------
@@ -53,13 +55,15 @@ MANIFEST_NAME = "file_manifest.csv"
 
 @dataclass
 class HFValidationSplitConfig:
-    """Config for holding out a fraction of HF events for validation"""
+    """Config for holding out a fraction of HF events for validation.
+
+    validation_fraction = 0.0 means no internal holdout: every HF event is used for training."""
     validation_fraction: float = 0.4
     random_seed: int = 42
 
     def validate(self) -> None:
-        if not 0.0 < self.validation_fraction < 1.0:
-            raise ValueError(f"Validation Fraction must be between 0 and 1, got {self.validation_fraction}")
+        if not 0.0 <= self.validation_fraction < 1.0:
+            raise ValueError(f"Validation Fraction must be in [0, 1), got {self.validation_fraction}")
 
 @dataclass(slots=True)
 class ShellConfig:
@@ -486,18 +490,26 @@ def split_hf_training_validation(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Keep every LF event for training and split on HF events
 
-    Fidelity read from file manifest"""
+    Fidelity read from file manifest. validation_fraction == 0.0 disables the internal
+    holdout: every HF event goes to training and the validation frame is empty."""
     if "fidelity" not in events.columns:
         raise ValueError("Events are missing the fidelity column")
     events = events.copy()
     events["fidelity"] = _validate_fidelity_series(events["fidelity"], context="Prepared events")
-    if not 0.0 < float(validation_fraction) < 1.0:
-        raise ValueError(f"Validation fraction must be between 0 and 1")
+    if not 0.0 <= float(validation_fraction) < 1.0:
+        raise ValueError(f"Validation fraction must be in [0, 1), got {validation_fraction}")
 
-    lf_training = events[events["fidelity"] == 0].copy()
+    lf_training = events[events["fidelity"] == 0].copy().reset_index(drop=True)
     hf_events = events[events["fidelity"] == 1].copy().reset_index(drop=True)
     if hf_events.empty:
         raise ValueError("No HF events were found")
+
+    if float(validation_fraction) == 0.0:
+        hf_validation = hf_events.iloc[0:0].copy()
+        print(f"[split] LF training (fidelity=0): {len(lf_training):,}")
+        print(f"[split] HF training (fidelity=1): {len(hf_events):,}")
+        print("[split] HF validation (fidelity=1): 0 (internal holdout disabled)")
+        return lf_training, hf_events, hf_validation
 
     n_hf = len(hf_events)
     n_validation = int(round(n_hf * float(validation_fraction)))
@@ -660,8 +672,20 @@ def write_h5_all_class_blocks(
 
     return pd.DataFrame.from_records(records)
 
-def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MANIFEST_NAME) -> PreparationResult:
-    """Run the existing raw-event -> shell-labelled HDF5 preparation pipeline."""
+def prepare_shell_cnp_data(
+    config: PreparationConfig,
+    *,
+    manifest_name: str = MANIFEST_NAME,
+    mode: str = "training",
+) -> PreparationResult:
+    """Run the existing raw-event -> shell-labelled HDF5 preparation pipeline.
+
+    mode="training" splits HF events per config.split and writes training/ (and validation/
+    if the holdout is non-zero). mode="independent_validation" requires every manifest row to
+    be fidelity 1, puts every event in the validation pool, and writes only validation/hf;
+    no training/ directory is created."""
+    if mode not in PREPARATION_MODES:
+        raise ValueError(f"mode must be one of {PREPARATION_MODES}, got {mode!r}")
     config.validate()
     validation_fraction = config.split.validation_fraction
     total_start = time.perf_counter()
@@ -682,6 +706,9 @@ def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MA
         stage_start,
         f"Loaded {len(input_manifest)} manifest rows from {input_dir / manifest_name}",
     )
+    if mode == "independent_validation" and (input_manifest["fidelity"] != 1).any():
+        bad = input_manifest.loc[input_manifest["fidelity"] != 1, "filename"].tolist()
+        raise ValueError(f"Independent validation manifest must contain only fidelity=1 rows; got non-HF rows: {bad[:10]}")
 
     files_loaded: list[Path] = []
     labeled_event_parts: list[pd.DataFrame] = []
@@ -768,16 +795,23 @@ def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MA
         f"Combined labeled event table has {len(all_events):,} rows",
     )
 
-    stage_start = log_stage("Splitting only high-fidelity events for validation")
-    lf_training_pool, hf_training_pool, hf_validation_pool = split_hf_training_validation(
-        all_events,
-        validation_fraction=validation_fraction,
-        random_seed=config.split.random_seed,
-    )
-    finish_stage(
-        stage_start,
-        f"HF split complete (validation_fraction={validation_fraction:.4f})",
-    )
+    if mode == "independent_validation":
+        stage_start = log_stage("Independent validation set: all events go to the validation pool")
+        lf_training_pool = all_events.iloc[0:0].copy()
+        hf_training_pool = all_events.iloc[0:0].copy()
+        hf_validation_pool = all_events.reset_index(drop=True)
+        finish_stage(stage_start, f"{len(hf_validation_pool):,} HF validation events, no training events")
+    else:
+        stage_start = log_stage("Splitting only high-fidelity events for validation")
+        lf_training_pool, hf_training_pool, hf_validation_pool = split_hf_training_validation(
+            all_events,
+            validation_fraction=validation_fraction,
+            random_seed=config.split.random_seed,
+        )
+        finish_stage(
+            stage_start,
+            f"HF split complete (validation_fraction={validation_fraction:.4f})",
+        )
 
     validation_block_size = (
         config.sampling.hf_block_size
@@ -811,6 +845,8 @@ def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MA
             validation_block_size,
         ),
     )
+    if mode == "independent_validation":
+        pool_specs = tuple(spec for spec in pool_specs if spec[3] == "validation")
 
     manifest_parts: list[pd.DataFrame] = []
     block_summaries: dict[str, dict[str, int | tuple[int, int]]] = {}
@@ -883,7 +919,7 @@ def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MA
         f"\nArtifacts:"
         f"\n- shell table by theta: {shell_table_path}"
         f"\n- manifest: {manifest_path}"
-        f"\n- training H5 root: {output_dir / 'training'}"
+        f"\n- training H5 root: {output_dir / 'training' if mode == 'training' else '(none, independent validation set)'}"
         f"\n- validation H5 root: {output_dir / 'validation'}"
     )
 
@@ -897,6 +933,58 @@ def prepare_shell_cnp_data(config: PreparationConfig, *, manifest_name: str = MA
         shell_table_path=Path(shell_table_path),
         manifest_path=Path(manifest_path),
     )
+
+def _paths_overlap(a: Path, b: Path) -> bool:
+    a, b = a.resolve(), b.resolve()
+    return a == b or a in b.parents or b in a.parents
+
+def prepare_independent_validation_data(
+    shell_config_path: str | Path,
+    *,
+    input_dir: str | Path,
+    output_dir: str | Path,
+    manifest_name: str = INDEPENDENT_MANIFEST_NAME,
+    train_manifest_name: str = MANIFEST_NAME,
+) -> PreparationResult:
+    """Prepare an independent HF validation set with the same shell settings as training.
+
+    Reuses prepare_shell_cnp_data in independent_validation mode. Only the input and output
+    directories differ from shell_config_path. Refuses to run if the output directory overlaps
+    the training output directory, or if any geometry also appears in the training manifest."""
+    train_config = build_config(shell_config_path)
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir)
+
+    train_input_dir = train_config.file_load.input_dir
+    train_output_dir = train_config.output.output_dir
+    if _paths_overlap(output_dir, train_output_dir):
+        raise ValueError(
+            f"Independent output_dir {output_dir.resolve()} overlaps the training output_dir "
+            f"{train_output_dir.resolve()}; refusing to run (it would be cleared)."
+        )
+    if _paths_overlap(input_dir, train_input_dir):
+        raise ValueError(f"Independent input_dir {input_dir.resolve()} overlaps the training input_dir {train_input_dir.resolve()}")
+
+    train_manifest = load_file_manifest(train_input_dir, manifest_name=train_manifest_name)
+    independent_manifest = load_file_manifest(input_dir, manifest_name=manifest_name)
+    shared_files = sorted(set(train_manifest["filename"]) & set(independent_manifest["filename"]))
+    if shared_files:
+        raise ValueError(f"Independent validation files also appear in the training manifest: {shared_files[:10]}")
+    train_geometries = set(zip(train_manifest["R"], train_manifest["Z"]))
+    shared_geometries = sorted(set(zip(independent_manifest["R"], independent_manifest["Z"])) & train_geometries)
+    if shared_geometries:
+        raise ValueError(f"Independent validation geometries (R, Z) also appear in the training manifest: {shared_geometries[:10]}")
+    print(
+        f"[independent] {len(independent_manifest)} geometries, none shared with the "
+        f"{len(train_manifest)} training geometries"
+    )
+
+    config = replace(
+        train_config,
+        file_load=replace(train_config.file_load, input_dir=input_dir),
+        output=replace(train_config.output, output_dir=output_dir),
+    )
+    return prepare_shell_cnp_data(config, manifest_name=manifest_name, mode="independent_validation")
 
 # -----------------------------------------------------------------------------
 # CNP
@@ -1582,9 +1670,13 @@ def run_shell_cnp_prediction(
     split: str = "validation",
     model_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    prepared_dir: str | Path | None = None,
     iteration: int = 0
 ) -> ShellPredictionResults:
-    """Wrapper for CNP prediction based on shells. Handles pool construction, generic CNP inference, shell aggregation, and CSV output."""
+    """Wrapper for CNP prediction based on shells. Handles pool construction, generic CNP inference, shell aggregation, and CSV output.
+
+    split="independent" reads <prepared_dir>/validation, where prepared_dir is the output of
+    prepare_independent_validation_data (required for this split)."""
     shell_raw = load_config(shell_config_path)
     cnp_raw = load_config(cnp_config_path)
     shell_cfg = shell_raw["shell"]
@@ -1592,15 +1684,20 @@ def run_shell_cnp_prediction(
     prediction_cfg = cnp_raw.get("prediction", {})
 
     n_shells = int(shell_cfg.get("n_shells", 100))
-    prepared_dir = Path(shell_raw["data"]["output_dir"])
+    train_prepared_dir = Path(shell_raw["data"]["output_dir"])
+    prepared_dir = train_prepared_dir if prepared_dir is None else Path(prepared_dir)
 
     split = split.lower()
     if split == "training":
         pool_dir = prepared_dir / "training"
     elif split == "validation":
         pool_dir = prepared_dir / "validation"
+    elif split == "independent":
+        if _paths_overlap(prepared_dir, train_prepared_dir):
+            raise ValueError("split='independent' requires prepared_dir pointing at the independent validation output, not the training output_dir")
+        pool_dir = prepared_dir / "validation"
     else:
-        raise ValueError("split must be either 'training' or 'validation'")
+        raise ValueError("split must be one of 'training', 'validation', 'independent'")
 
     pool = ShellH5EventPool(
         pool_dir,
@@ -1617,7 +1714,12 @@ def run_shell_cnp_prediction(
     if model_path is None:
         model_path = cnp_output_dir / f"cnp_{version}_model.pth"
     if output_path is None:
-        output_path = cnp_output_dir / (f"cnp_{version}_output.csv" if split == "training" else f"cnp_{version}_output_validation.csv")
+        output_name = {
+            "training": f"cnp_{version}_output.csv",
+            "validation": f"cnp_{version}_output_validation.csv",
+            "independent": f"cnp_{version}_output_independent.csv",
+        }[split]
+        output_path = cnp_output_dir / output_name
 
     model_path = Path(model_path)
     output_path = Path(output_path)

@@ -11,7 +11,7 @@ scale_power = 0.3333333333333333
 min_candidate_events = 1
 
 [split]
-validation_fraction = 0.40
+validation_fraction = 0.0  # 0.0 = no internal holdout; validation uses the independent data/val_data set
 random_seed = 42
 
 [blocks]
