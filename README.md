@@ -70,13 +70,26 @@ cd positional_shells
 
 This repo is built so an AI coding agent can run the whole pipeline on its own. The runbook ([`RUNBOOK.md`](RUNBOOK.md)) is written as a sequence of steps, each with a command and a check that tells the agent whether the step succeeded before moving on.
 
-To do this, open the repo in your agent (for example Claude Code), and give it:
+### How to run it with Claude Code
 
-> Read RUNBOOK.md and run the pipeline end to end. Run the steps in order, and after each step verify its expected output before continuing. If a step fails its check, stop and report the error.
+**1. Install Claude Code** if you don't have it — see the [Claude Code docs](https://docs.claude.com/en/docs/claude-code). It runs in your terminal.
 
-The agent will prepare the data, train the CNP, run predictions, train and validate the MF-GP, and generate the plots — checking its own work at each stage. When it finishes, the trained models, metrics, and plots are under `outputs/`.
+**2. Open it in the repo**, so it has the project in context:
+
+```
+cd xlzd-agent
+claude
+```
+
+**3. Give it the task.** Paste this prompt:
+
+> Read AGENT.md and RUNBOOK.md, then run the pipeline end to end. Set up the environment first, run steps 1 through 6 in order from the positional_shells directory, and verify each step's expected output before moving to the next. If a step fails its check, stop and report the error. When done, report the Step 5 validation metrics and confirm the Step 6 plots exist.
+
+The agent will set up the environment, prepare the data, train the CNP, run predictions, train and validate the MF-GP, and generate the plots — checking its own work at each stage. When it finishes, the trained models, metrics, and plots are under `outputs/`.
 
 The reason this works without supervision is that each step in the runbook declares a **verifiable postcondition** — a specific file that must exist or a specific line that must print. The agent doesn't guess whether a step worked; it checks. That's what makes it safe to run unattended.
+
+**Heads up on Step 2:** during CNP training the progress bars can look stuck (e.g. "2 of 1000 batches"). That's just a display issue — training is still running, and the history file confirms all steps complete.
 
 ---
 
