@@ -1,8 +1,6 @@
-# xlzd-agent
+Reproduce the XLZD RESuM surrogate-model results by pointing a coding agent at a runbook and letting it drive. Clone the repo, set up the environment, and either run the pipeline yourself or hand the runbook to an agent. Both produce the same trained models, validation metrics, and plots.
 
-Reproduce the XLZD RESuM surrogate-model results by pointing a coding agent at a runbook and letting it drive. Clone the repo, set up the environment, and either run the pipeline yourself or hand the runbook to an agent — both produce the same trained models, validation metrics, and plots.
-
-**You do not need to know anything about RESuM, dark matter detectors, or this codebase to use this repo.** Everything needed to produce the results is included: the model code, a bundled sample dataset, the environment specification, and a step-by-step runbook written to be followed by a person or an AI agent.
+**You do not need to know anything about RESuM, dark matter detectors, or this codebase to use this repo.** Everything needed to produce the results is included. The model code, a bundled sample dataset, the environment specification, and a step-by-step runbook written to be followed by a person or an AI agent.
 
 ---
 
@@ -12,9 +10,9 @@ Running the pipeline end to end trains a surrogate model that predicts a detecto
 
 - a trained CNP model and a trained MF-GP model,
 - validation metrics (R², RMSE, coverage),
-- five plots under `outputs/plots/` — the CNP shell-occupancy fits, the MF-GP validation points and parity plot, and the MF-GP mean/uncertainty surface over geometry space.
+- five plots under `outputs/plots/`: the CNP shell-occupancy fits, the MF-GP validation points and parity plot, and the MF-GP mean/uncertainty surface over geometry space.
 
-If you want to understand *what* those things are, read [`BACKGROUND.md`](BACKGROUND.md). If you only want to reproduce the results, you can skip it — the runbook does not assume you've read it.
+If you want to understand *what* those things are, read [`BACKGROUND.md`](BACKGROUND.md). If you only want to reproduce the results, you can skip it. The runbook does not assume you've read it.
 
 ---
 
@@ -35,7 +33,7 @@ You need:
    # then, once:
    git lfs install
    ```
-3. **(Optional) an NVIDIA GPU.** The pipeline runs on CPU if no GPU is present — slower, but it completes. GPU setup notes are in [`SETUP.md`](SETUP.md), including the fix for recent (Blackwell / RTX 50-series) cards.
+3. **(Optional) an NVIDIA GPU.** The pipeline runs on CPU if no GPU is present. That's slower, but it completes. GPU setup notes are in [`SETUP.md`](SETUP.md), including the fix for recent (Blackwell / RTX 50-series) cards.
 
 ---
 
@@ -59,7 +57,7 @@ Then **either** run it yourself:
 
 ```bash
 cd positional_shells
-# follow RUNBOOK.md, steps 1–6, in order
+# follow RUNBOOK.md, steps 1-6, in order
 ```
 
 **or** hand it to a coding agent (see below).
@@ -72,7 +70,7 @@ This repo is built so an AI coding agent can run the whole pipeline on its own. 
 
 ### How to run it with Claude Code
 
-**1. Install Claude Code** if you don't have it — see the [Claude Code docs](https://docs.claude.com/en/docs/claude-code). It runs in your terminal.
+**1. Install Claude Code** if you don't have it. See the [Claude Code docs](https://docs.claude.com/en/docs/claude-code). It runs in your terminal.
 
 **2. Open it in the repo**, so it has the project in context:
 
@@ -85,11 +83,11 @@ claude
 
 > Read AGENT.md and RUNBOOK.md, then run the pipeline end to end. Set up the environment first, run steps 1 through 6 in order from the positional_shells directory, and verify each step's expected output before moving to the next. If a step fails its check, stop and report the error. When done, report the Step 5 validation metrics and confirm the Step 6 plots exist.
 
-The agent will set up the environment, prepare the data, train the CNP, run predictions, train and validate the MF-GP, and generate the plots — checking its own work at each stage. When it finishes, the trained models, metrics, and plots are under `outputs/`.
+The agent will set up the environment, prepare the data, train the CNP, run predictions, train and validate the MF-GP, and generate the plots, checking its own work at each stage. When it finishes, the trained models, metrics, and plots are under `outputs/`.
 
-The reason this works without supervision is that each step in the runbook declares a **verifiable postcondition** — a specific file that must exist or a specific line that must print. The agent doesn't guess whether a step worked; it checks. That's what makes it safe to run unattended.
+This works without supervision because each step in the runbook declares a **verifiable postcondition**, a specific file that must exist or a specific line that must print. The agent doesn't guess whether a step worked. It checks. That's what makes it safe to run unattended.
 
-**Heads up on Step 2:** during CNP training the progress bars can look stuck (e.g. "2 of 1000 batches"). That's just a display issue — training is still running, and the history file confirms all steps complete.
+**Heads up on Step 2:** during CNP training the progress bars can look stuck (e.g. "2 of 1000 batches"). That's just a display issue. Training is still running, and the history file confirms all steps complete.
 
 ---
 
@@ -113,10 +111,10 @@ The reason this works without supervision is that each step in the runbook decla
 
 ## About the bundled data
 
-The dataset in `data/` is a **faithful sample** of the real training and validation data — the same files, the same format — trimmed only in quantity so the repo stays a reasonable size:
+The dataset in `data/` is a **faithful sample** of the real training and validation data, the same files in the same format, trimmed only in quantity so the repo stays a reasonable size:
 
 - all 5 high-fidelity training geometries, included unchanged,
 - 50 of the ~200 low-fidelity training geometries, included unchanged,
 - all validation geometries, downsampled to 10,000 events each (whole events, so each kept event keeps all its deposits).
 
-This is enough to run the full pipeline and reproduce representative plots and metrics. It is a demonstration dataset: the results will have the right character, but exact numbers depend on the full dataset. To run against the complete data, replace `data/train_data` and `data/val_data` with the full set (or symlinks to it) and rerun — nothing else changes.
+This is enough to run the full pipeline and reproduce representative plots and metrics. It is a demonstration dataset, so the results will have the right character, but exact numbers depend on the full dataset. To run against the complete data, replace `data/train_data` and `data/val_data` with the full set (or symlinks to it) and rerun. Nothing else changes.
